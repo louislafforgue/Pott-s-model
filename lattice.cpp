@@ -2,19 +2,21 @@
 #include <stdlib.h>
 #include <math.h>
 #include <sstream>
+#include <complex>
 #include "lattice.h"
 #include "nrutil.h"
 
-Lattice::Lattice(int N, int Q, double H, double s[], double s_initial_values[]){
+template <class T> class complex;
+
+#define PI 3.1415926
+
+
+Lattice::Lattice(int N, double s[], double s_initial_values[]){
   // call constructur make a lattice with periodic boundary,
   // spins initially setted equal to the array "s_initial_values"
   L = sqrt(N);
-  q=Q; //number of different spins
-  h=H; 
   for (int i =0; i<N; i++){
-
     s[i] = s_initial_values[i];
-    //printf("%.1f \n", s[i]);
   }
 }
 
@@ -76,71 +78,105 @@ int Lattice::get_below(int i){
   return j;
 }
 
-double Lattice::get_energy(double s[]){
+double Lattice::get_energy(double s[], double J, double h){
   // return the energy E of a given configuration
   int N = L*L;
-  double E = 0.0;
+  double E_int = 0.0;
+  double E_ext = 0.0;
   for (int i =0; i<N; i++){
-    E -= int(s[i]==s[get_right(i)]) + int(s[i]==s[get_below(i)]);
-  } 
-  return E;
+    if(s[get_right(i)] == s[i]){
+	  E_int ++;
+	}
+	if(s[get_below(i)] == s[i]){
+	  E_int ++;
+	}
+	E_ext += s[i];
+  }
+  E_int *= -J;
+  E_ext *= -h;
+  E_int += E_ext;
+  return E_int;
 }
 
-double Lattice::get_magnetization(double s[]){
+std::complex<double> Lattice::get_magnetization(double s[], int q){
   // return the magnetization m of a given configuration
   int N = L*L;
-  double m =0.0;
-  for (int i =0; i<N; i++){
-    m += s[i];
+  std::complex<double> m =(0.0,0.0);
+  std::complex<double> np[q];
+  for (int p = 0; p<q; p++){
+	np[p] = (0.0,0.0);
   }
-  m = fabs(m)/N;
+  for (int i=0; i<N; i++){
+	np[int(s[i])] += std::complex<double>(1.0,0.0);
+  }
+  for (int p = 0; p<q; p++){
+	np[p] /= std::complex<double> (N*1.0, 0.0);
+  }
+  
+  for (int p =0; p<q; p++){
+	m += exp(std::complex<double>(0.0,(2*PI*(p+1)/q))) * np[p];
+
+  
+  }
   return m;
 }
 
-void Lattice::Metropolis (double s[], double T, int nmcstep){
-
+void Lattice::Metropolis (double s[], double T, int q, double J, double h, int nmcstep){
   // perform nmcstep Monte Carlo time steps 
   // using the Metropolis Algorithm 
   // T = temperature
   int N = L*L;
   double beta = 1./T;
-  double * precalc;
-  //how many value can energy difference be? 
-  precalc = dvector(-q,q);
-  for (int i=-q; i<=q; i++){
-    precalc[i] = exp(-beta*i);
+  double * precalc1;
+  double * precalc2;
+  precalc1 = dvector(-4,4);
+  precalc2 = dvector(-(q-1),(q-1));
+  for (int i=-4; i<=4; i++){
+    precalc1[i] = exp(J*beta*i);
+  }
+  for (int i=-(q-1); i<q; i++){
+    precalc2[i] = exp(h*beta*i);
   }
   for (int t=0; t<nmcstep; t++){
-    //select a random spin
     int i = rand() % N;
-    double E_in=0;
-    //printf("%.1f %.1f %.1f %.1f \n", get_right(i), get_left(i), get_below(i),get_above(i)); 
-    if(s[i]==s[get_right(i)]){E_in-=1;}
-    if(s[i]==s[get_left(i)]){E_in-=1;}
-    if(s[i]==s[get_below(i)]){E_in-=1;}
-    if(s[i]==s[get_above(i)]){E_in-=1;}
-    E_in-=s[i]*h;
-    //select a random orientation
-    double E_fin=0; 
-    double xa = rand()%q;
-    if(xa==s[get_right(i)]){E_fin-=1;}
-    if(xa==s[get_left(i)]){E_fin-=1;}
-    if(xa==s[get_below(i)]){E_fin-=1;}
-    if(xa==s[get_above(i)]){E_fin-=1;}
-    E_fin-=h*xa;
-
-    //calculate the energy difference
-    int j = int((E_fin-E_in));
-    //printf("%.1f %.1f %.1f \n", xa, E_fin, E_in); 
-    //if smaller than 0, we accept the move
-    if (j<=0) {
-      s[i] = xa;
-	}
-  //if not we accept the move with a certain probability 
-  else {
-	  if (precalc[j] > rand()/((double) RAND_MAX)) {
-        s[i] = xa;
-      }
-	}
+    int c = rand() % q;
+    while (s[i] == c){
+	  c = rand() % q;
+    }    
+    
+    double E_int_in = 0;
+    double E_int_fin = 0;
+    
+    if(s[get_below(i)] == s[i]){
+	  E_int_in ++;
+    }
+    if(s[get_below(i)] == c){
+	  E_int_fin ++;
+    }
+    if(s[get_above(i)] == s[i]){
+	  E_int_in ++;
+    }
+    if(s[get_above(i)] == c){
+	  E_int_fin ++;
+    }
+    if(s[get_right(i)] == s[i]){
+	  E_int_in ++;
+    }
+    if(s[get_right(i)] == c){
+	  E_int_fin ++;
+    }
+    if(s[get_left(i)] == s[i]){
+	  E_int_in ++;
+    }
+    if(s[get_left(i)] == c){
+	  E_int_fin ++;
+    }
+    
+    
+    int k = int(E_int_fin-E_int_in);
+    int l = int(c-s[i]);
+	if ((precalc1[k]*precalc2[l]) > rand()/((double) RAND_MAX)) {
+      s[i] = c;
+    }
   }
 }
